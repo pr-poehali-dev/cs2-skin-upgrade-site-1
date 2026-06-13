@@ -1,0 +1,20 @@
+{
+  "tests": [
+    {
+      "name": "Missing params",
+      "method": "GET",
+      "path": "/",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "token and steam_id required"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Invalid token",
+      "method": "GET",
+      "path": "/?token=bad&steam_id=12345",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}

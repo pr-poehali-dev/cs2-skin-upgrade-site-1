@@ -1,0 +1,18 @@
+{
+  "tests": [
+    {
+      "name": "Me unauthorized",
+      "method": "GET",
+      "path": "/?action=me&token=invalid",
+      "expectedStatus": 401,
+      "expectedBody": {"error": "unauthorized"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Login redirect",
+      "method": "GET",
+      "path": "/?action=login",
+      "expectedStatus": 200
+    }
+  ]
+}

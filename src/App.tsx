@@ -1,8 +1,20 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Icon from "@/components/ui/icon";
+
+// ─── API URLs ─────────────────────────────────────────────────────────────────
+const API_AUTH     = "https://functions.poehali.dev/a271073f-7df2-4b87-b3f0-ce63d38ac2b4";
+const API_INVENTORY = "https://functions.poehali.dev/0fdf3cc8-7598-4931-9d5a-5f14ea25de11";
+const API_MARKET   = "https://functions.poehali.dev/b368fab8-f8d3-4edc-acba-364d016908c2";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Page = "home" | "inventory" | "upgrade" | "catalog" | "history" | "profile" | "support";
+
+interface SteamUser {
+  steam_id: string;
+  username: string;
+  avatar: string;
+  profile_url: string;
+}
 
 interface Skin {
   id: string;
@@ -24,12 +36,13 @@ interface Notification {
   time: string;
 }
 
-// ─── Mock Data ────────────────────────────────────────────────────────────────
+// ─── Static assets ────────────────────────────────────────────────────────────
 const HERO_IMG = "https://cdn.poehali.dev/projects/492c8702-220d-4cec-86f9-9df87b984e3f/files/d5b55878-fb9b-4ee5-994a-45833cb89ac8.jpg";
-const AK_IMG = "https://cdn.poehali.dev/projects/492c8702-220d-4cec-86f9-9df87b984e3f/files/38d3ce61-d731-4cc5-afb9-aa26e3153719.jpg";
+const AK_IMG   = "https://cdn.poehali.dev/projects/492c8702-220d-4cec-86f9-9df87b984e3f/files/38d3ce61-d731-4cc5-afb9-aa26e3153719.jpg";
 const KNIFE_IMG = "https://cdn.poehali.dev/projects/492c8702-220d-4cec-86f9-9df87b984e3f/files/cd0e2b43-e02f-444c-a20f-cc9465e24a61.jpg";
 
-const MOCK_SKINS: Skin[] = [
+// Demo fallback skins (shown when not logged in)
+const DEMO_SKINS: Skin[] = [
   { id: "1", name: "Нео-нуар", weapon: "AWP", rarity: "covert", wear: "Factory New", price: 4250, image: AK_IMG, float: 0.012 },
   { id: "2", name: "Дракон Огненный Змей", weapon: "AK-47", rarity: "classified", wear: "Field-Tested", price: 1890, image: AK_IMG, float: 0.23, stattrak: true },
   { id: "3", name: "Изумрудный клинок", weapon: "Karambit", rarity: "extraordinary", wear: "Minimal Wear", price: 12400, image: KNIFE_IMG, float: 0.08 },
@@ -48,11 +61,53 @@ const MOCK_HISTORY = [
   { id: "tx005", type: "upgrade", from: "AWP | Нео-нуар", to: "Karambit | Стальной крыс", result: "win", profit: "+8 100 ₽", time: "вчера", chance: 19 },
 ];
 
-const MOCK_NOTIFS: Notification[] = [
-  { id: "n1", title: "Апгрейд завершён!", message: "AWP | Нео-нуар успешно обменян", type: "upgrade", time: "2 мин" },
-  { id: "n2", title: "Новый скин", message: "Karambit | Crimson Web появился в каталоге", type: "offer", time: "10 мин" },
-  { id: "n3", title: "Горячее предложение", message: "AK-47 | Огненный Змей -15% до 22:00", type: "offer", time: "30 мин" },
-];
+// ─── Auth hook ───────────────────────────────────────────────────────────────
+function useAuth() {
+  const [user, setUser] = useState<SteamUser | null>(null);
+  const [token, setToken] = useState<string>(() => localStorage.getItem("cs2up_token") || "");
+
+  // Parse URL params after Steam callback
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    if (p.get("auth") === "ok") {
+      const t = p.get("token") || "";
+      const u: SteamUser = {
+        steam_id: p.get("steam_id") || "",
+        username: decodeURIComponent(p.get("username") || ""),
+        avatar: decodeURIComponent(p.get("avatar") || ""),
+        profile_url: "",
+      };
+      localStorage.setItem("cs2up_token", t);
+      localStorage.setItem("cs2up_user", JSON.stringify(u));
+      setToken(t);
+      setUser(u);
+      window.history.replaceState({}, "", "/");
+    } else if (p.get("auth") === "error") {
+      window.history.replaceState({}, "", "/");
+    } else {
+      // Restore from localStorage
+      const saved = localStorage.getItem("cs2up_user");
+      const savedToken = localStorage.getItem("cs2up_token");
+      if (saved && savedToken) {
+        setUser(JSON.parse(saved));
+        setToken(savedToken);
+      }
+    }
+  }, []);
+
+  const login = () => {
+    window.location.href = `${API_AUTH}/?action=login`;
+  };
+
+  const logout = () => {
+    localStorage.removeItem("cs2up_token");
+    localStorage.removeItem("cs2up_user");
+    setUser(null);
+    setToken("");
+  };
+
+  return { user, token, login, logout };
+}
 
 const RARITY_LABELS: Record<string, string> = {
   consumer: "Ширпотреб",
@@ -126,7 +181,7 @@ function NotifToast({ notif, onClose }: { notif: Notification; onClose: () => vo
 }
 
 // ─── Pages ────────────────────────────────────────────────────────────────────
-function HomePage({ setPage }: { setPage: (p: Page) => void }) {
+function HomePage({ setPage, user, onLogin }: { setPage: (p: Page) => void; user: SteamUser | null; onLogin: () => void }) {
   return (
     <div className="animate-fade-in">
       {/* Hero */}
@@ -156,10 +211,17 @@ function HomePage({ setPage }: { setPage: (p: Page) => void }) {
               Превращай обычные скины в редкие. Умный апгрейд с честными шансами и мгновенным результатом. Войди через Steam — играй по-крупному.
             </p>
             <div className="flex flex-wrap gap-4">
-              <button className="btn-steam flex items-center gap-2">
-                <Icon name="LogIn" size={18} />
-                Войти через Steam
-              </button>
+              {user ? (
+                <button onClick={() => setPage("inventory")} className="btn-steam flex items-center gap-2">
+                  {user.avatar && <img src={user.avatar} className="w-5 h-5 rounded-full" alt="" />}
+                  {user.username}
+                </button>
+              ) : (
+                <button onClick={onLogin} className="btn-steam flex items-center gap-2">
+                  <Icon name="LogIn" size={18} />
+                  Войти через Steam
+                </button>
+              )}
               <button onClick={() => setPage("catalog")} className="btn-neon flex items-center gap-2">
                 <Icon name="Layers" size={18} />
                 Каталог скинов
@@ -216,23 +278,98 @@ function HomePage({ setPage }: { setPage: (p: Page) => void }) {
   );
 }
 
-function InventoryPage() {
+function InventoryPage({ user, token, onLogin }: { user: SteamUser | null; token: string; onLogin: () => void }) {
+  const [skins, setSkins] = useState<Skin[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
+  const [selling, setSelling] = useState<string | null>(null);
+  const [sellPrice, setSellPrice] = useState<Record<string, string>>({});
+  const [sellStatus, setSellStatus] = useState<Record<string, string>>({});
+
+  const loadInventory = useCallback(async () => {
+    if (!user || !token) return;
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetch(`${API_INVENTORY}/?steam_id=${user.steam_id}&token=${encodeURIComponent(token)}`);
+      const data = await r.json();
+      if (data.items) setSkins(data.items);
+      else setError(data.error || "Не удалось загрузить инвентарь");
+    } catch {
+      setError("Ошибка соединения");
+    } finally {
+      setLoading(false);
+    }
+  }, [user, token]);
+
+  useEffect(() => { loadInventory(); }, [loadInventory]);
+
   const toggle = (id: string) => setSelected((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
-  const total = MOCK_SKINS.filter((s) => selected.includes(s.id)).reduce((sum, s) => sum + s.price, 0);
+  const total = skins.filter((s) => selected.includes(s.id)).reduce((sum, s) => sum + s.price, 0);
+
+  const handleSell = async (skin: Skin) => {
+    const price = parseInt(sellPrice[skin.id] || "0") * 100; // в копейках
+    if (!price) return;
+    setSellStatus((p) => ({ ...p, [skin.id]: "loading" }));
+    try {
+      const r = await fetch(`${API_MARKET}/?action=sell`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assetid: skin.id, price }),
+      });
+      const data = await r.json();
+      setSellStatus((p) => ({ ...p, [skin.id]: data.success ? "ok" : "error" }));
+    } catch {
+      setSellStatus((p) => ({ ...p, [skin.id]: "error" }));
+    }
+    setSelling(null);
+  };
+
+  if (!user) {
+    return (
+      <div className="max-w-5xl mx-auto px-6 py-20 text-center animate-fade-in">
+        <div className="w-20 h-20 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto mb-6">
+          <Icon name="Package" size={36} className="text-primary" />
+        </div>
+        <h2 className="font-oswald text-3xl text-white mb-3">ВОЙДИ ЧЕРЕЗ STEAM</h2>
+        <p className="text-muted-foreground font-rajdhani mb-8 max-w-sm mx-auto">Чтобы увидеть свой CS2 инвентарь, войди через Steam аккаунт</p>
+        <button onClick={onLogin} className="btn-steam flex items-center gap-2 mx-auto">
+          <Icon name="LogIn" size={18} /> Войти через Steam
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 animate-fade-in">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h2 className="font-oswald text-4xl text-white tracking-wider">МОЙ ИНВЕНТАРЬ</h2>
-          <p className="text-muted-foreground text-sm mt-1 font-mono">steam: ProPlayer_2077 · {MOCK_SKINS.length} предметов</p>
+          <p className="text-muted-foreground text-sm mt-1 font-mono">
+            steam: {user.username} · {loading ? "загрузка..." : `${skins.length} предметов`}
+          </p>
         </div>
-        <div className="text-right">
-          <div className="font-oswald text-2xl text-primary">{MOCK_SKINS.reduce((s, k) => s + k.price, 0).toLocaleString()} ₽</div>
-          <div className="text-muted-foreground text-xs font-mono">общая стоимость</div>
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <div className="font-oswald text-2xl text-primary">
+              {skins.reduce((s, k) => s + (k.price || 0), 0).toLocaleString()} ₽
+            </div>
+            <div className="text-muted-foreground text-xs font-mono">общая стоимость</div>
+          </div>
+          <button onClick={loadInventory} disabled={loading} className="w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
+            <Icon name={loading ? "Loader2" : "RefreshCw"} size={16} className={loading ? "animate-spin" : ""} />
+          </button>
         </div>
       </div>
+
+      {error && (
+        <div className="neon-border border-red-500/40 bg-red-500/5 rounded-lg p-4 mb-6 flex items-center gap-3">
+          <Icon name="AlertCircle" size={18} className="text-red-400 flex-shrink-0" />
+          <span className="text-red-300 font-rajdhani text-sm">{error}. Убедись, что инвентарь CS2 открыт в настройках Steam.</span>
+        </div>
+      )}
+
       {selected.length > 0 && (
         <div className="neon-border rounded-lg p-4 mb-6 flex items-center justify-between animate-scale-in">
           <span className="text-white font-rajdhani">Выбрано: <span className="text-primary font-bold">{selected.length}</span> · {total.toLocaleString()} ₽</span>
@@ -242,13 +379,93 @@ function InventoryPage() {
           </div>
         </div>
       )}
+
+      {loading && skins.length === 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="skin-card rounded-lg overflow-hidden animate-pulse">
+              <div className="w-full h-36 bg-secondary/50" />
+              <div className="p-3 space-y-2">
+                <div className="h-2 w-16 bg-secondary/50 rounded" />
+                <div className="h-3 w-full bg-secondary/50 rounded" />
+                <div className="h-4 w-20 bg-secondary/50 rounded mt-2" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {MOCK_SKINS.map((skin, i) => (
-          <div key={skin.id} className="animate-fade-in" style={{ animationDelay: `${i * 0.05}s` }}>
-            <SkinCard skin={skin} onSelect={() => toggle(skin.id)} selected={selected.includes(skin.id)} />
+        {skins.map((skin, i) => (
+          <div key={skin.id} className="animate-fade-in" style={{ animationDelay: `${Math.min(i * 0.03, 0.5)}s` }}>
+            <div className={`skin-card rounded-lg overflow-hidden relative ${selected.includes(skin.id) ? "border-primary/80 shadow-[0_0_20px_hsl(var(--primary)/0.3)]" : ""}`}>
+              <div className="relative cursor-none" onClick={() => toggle(skin.id)}>
+                <img
+                  src={skin.image}
+                  alt={skin.name}
+                  className="w-full h-36 object-contain bg-black/20 p-2"
+                  onError={(e) => { (e.target as HTMLImageElement).src = AK_IMG; }}
+                />
+                {skin.stattrak && (
+                  <span className="absolute top-2 left-2 text-[10px] font-oswald font-bold bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 px-1.5 py-0.5 rounded">ST™</span>
+                )}
+                {selected.includes(skin.id) && (
+                  <div className="absolute inset-0 bg-primary/10 flex items-center justify-center">
+                    <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center">
+                      <Icon name="Check" size={14} className="text-background" />
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="p-3">
+                <div className={`text-[10px] font-mono rarity-${skin.rarity} mb-0.5 uppercase tracking-wider`}>{RARITY_LABELS[skin.rarity]}</div>
+                <div className="text-white font-rajdhani font-semibold text-sm leading-tight truncate">{skin.weapon} | {skin.name}</div>
+                <div className="text-muted-foreground text-xs mt-0.5">{skin.wear}</div>
+                <div className="flex items-center justify-between mt-2 gap-1">
+                  <span className="text-primary font-oswald font-bold text-sm">{skin.price ? `${skin.price.toLocaleString()} ₽` : "—"}</span>
+                  <button
+                    onClick={() => setSelling(selling === skin.id ? null : skin.id)}
+                    className="text-[10px] font-mono text-muted-foreground hover:text-yellow-400 transition-colors flex items-center gap-0.5"
+                  >
+                    <Icon name="DollarSign" size={10} /> Продать
+                  </button>
+                </div>
+                {selling === skin.id && (
+                  <div className="mt-2 flex gap-1 animate-fade-in">
+                    <input
+                      type="number"
+                      placeholder="₽ цена"
+                      value={sellPrice[skin.id] || ""}
+                      onChange={(e) => setSellPrice((p) => ({ ...p, [skin.id]: e.target.value }))}
+                      className="flex-1 bg-secondary border border-border rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-primary/60 font-mono w-0"
+                    />
+                    <button
+                      onClick={() => handleSell(skin)}
+                      disabled={sellStatus[skin.id] === "loading"}
+                      className="px-2 py-1 bg-primary/20 border border-primary/40 text-primary text-xs rounded hover:bg-primary/30 transition-colors font-mono"
+                    >
+                      {sellStatus[skin.id] === "loading" ? "..." : sellStatus[skin.id] === "ok" ? "✓" : "OK"}
+                    </button>
+                  </div>
+                )}
+                {sellStatus[skin.id] === "ok" && (
+                  <div className="text-[10px] text-green-400 font-mono mt-1">✓ Выставлено на market.csgo.com</div>
+                )}
+                {sellStatus[skin.id] === "error" && (
+                  <div className="text-[10px] text-red-400 font-mono mt-1">Ошибка — проверь CSGO Market API ключ</div>
+                )}
+              </div>
+            </div>
           </div>
         ))}
       </div>
+
+      {!loading && skins.length === 0 && !error && (
+        <div className="text-center py-16 text-muted-foreground font-rajdhani">
+          <Icon name="Package" size={48} className="mx-auto mb-4 opacity-30" />
+          <div>В инвентаре нет скинов CS2</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -480,7 +697,7 @@ function CatalogPage() {
   const [filterRarity, setFilterRarity] = useState("all");
   const [sortBy, setSortBy] = useState<"price-asc" | "price-desc" | "float">("price-desc");
 
-  const filtered = MOCK_SKINS
+  const filtered = DEMO_SKINS
     .filter((s) => (filterRarity === "all" || s.rarity === filterRarity) && `${s.weapon} ${s.name}`.toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => sortBy === "price-asc" ? a.price - b.price : sortBy === "price-desc" ? b.price - a.price : a.float - b.float);
 
@@ -557,29 +774,56 @@ function HistoryPage() {
   );
 }
 
-function ProfilePage() {
+function ProfilePage({ user, onLogin, onLogout }: { user: SteamUser | null; onLogin: () => void; onLogout: () => void }) {
   const [notifSettings, setNotifSettings] = useState({ newSkins: true, upgrades: true, offers: false, price: true });
+
+  if (!user) {
+    return (
+      <div className="max-w-4xl mx-auto px-6 py-20 text-center animate-fade-in">
+        <div className="w-20 h-20 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto mb-6">
+          <Icon name="User" size={36} className="text-primary" />
+        </div>
+        <h2 className="font-oswald text-3xl text-white mb-3">ВОЙДИ ЧЕРЕЗ STEAM</h2>
+        <p className="text-muted-foreground font-rajdhani mb-8 max-w-sm mx-auto">Для доступа к профилю и настройкам нужна авторизация</p>
+        <button onClick={onLogin} className="btn-steam flex items-center gap-2 mx-auto">
+          <Icon name="LogIn" size={18} /> Войти через Steam
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-8 animate-fade-in">
       <h2 className="font-oswald text-4xl text-white tracking-wider mb-8">ПРОФИЛЬ</h2>
       <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-6">
         <div className="neon-border rounded-lg p-6 text-center h-fit">
-          <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/40 flex items-center justify-center mx-auto mb-4 animate-pulse-neon">
-            <Icon name="User" size={36} className="text-primary" />
-          </div>
-          <div className="font-oswald text-xl text-white font-bold">ProPlayer_2077</div>
-          <div className="text-muted-foreground text-xs font-mono mt-1">Steam ID: 76561198...</div>
+          {user.avatar ? (
+            <img src={user.avatar} alt={user.username} className="w-20 h-20 rounded-full border-2 border-primary/40 mx-auto mb-4 animate-pulse-neon" />
+          ) : (
+            <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/40 flex items-center justify-center mx-auto mb-4 animate-pulse-neon">
+              <Icon name="User" size={36} className="text-primary" />
+            </div>
+          )}
+          <div className="font-oswald text-xl text-white font-bold">{user.username}</div>
+          <div className="text-muted-foreground text-xs font-mono mt-1">Steam ID: {user.steam_id}</div>
           <div className="mt-4 pt-4 border-t border-border space-y-2">
-            {[["Статус", "ВЕРИФИЦИРОВАН", "text-primary text-xs font-oswald font-bold"], ["Регистрация", "12.03.2024", "text-white font-mono text-xs"], ["Апгрейдов", "247", "text-white font-oswald font-bold"]].map(([label, val, cls]) => (
+            {[
+              ["Статус", "ВЕРИФИЦИРОВАН", "text-primary text-xs font-oswald font-bold"],
+              ["Steam", "Подключён", "text-green-400 font-mono text-xs"],
+            ].map(([label, val, cls]) => (
               <div key={label} className="flex justify-between text-sm">
                 <span className="text-muted-foreground font-rajdhani">{label}</span>
                 <span className={cls}>{val}</span>
               </div>
             ))}
           </div>
-          <button className="btn-steam w-full mt-6 flex items-center justify-center gap-2 text-sm">
-            <Icon name="RefreshCw" size={14} /> Обновить Steam
+          {user.profile_url && (
+            <a href={user.profile_url} target="_blank" rel="noopener noreferrer" className="btn-steam w-full mt-4 flex items-center justify-center gap-2 text-sm">
+              <Icon name="ExternalLink" size={14} /> Steam профиль
+            </a>
+          )}
+          <button onClick={onLogout} className="w-full mt-3 py-2 px-4 border border-border text-muted-foreground hover:text-white hover:border-white/30 rounded text-xs font-oswald uppercase tracking-wider transition-colors flex items-center justify-center gap-2">
+            <Icon name="LogOut" size={14} /> Выйти
           </button>
         </div>
         <div className="space-y-4">
@@ -724,6 +968,7 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const cursorDot = useRef<HTMLDivElement>(null);
   const cursorRing = useRef<HTMLDivElement>(null);
+  const { user, token, login, logout } = useAuth();
 
   useEffect(() => {
     const move = (e: MouseEvent) => {
@@ -734,12 +979,13 @@ export default function App() {
     return () => window.removeEventListener("mousemove", move);
   }, []);
 
+  // Show welcome toast after Steam login
   useEffect(() => {
-    const timers = MOCK_NOTIFS.map((n, i) =>
-      setTimeout(() => setToasts((p) => [...p, n]), [3000, 8000, 15000][i])
-    );
-    return () => timers.forEach(clearTimeout);
-  }, []);
+    if (user) {
+      const toast: Notification = { id: "welcome", title: `Привет, ${user.username}!`, message: "Steam аккаунт подключён. Инвентарь загружается.", type: "success", time: "только что" };
+      setToasts((p) => p.find((t) => t.id === "welcome") ? p : [...p, toast]);
+    }
+  }, [user]);
 
   const removeToast = (id: string) => setToasts((p) => p.filter((t) => t.id !== id));
 
@@ -779,13 +1025,24 @@ export default function App() {
           <div className="flex items-center gap-3">
             <button onClick={() => setNotifOpen(!notifOpen)} className="relative w-8 h-8 flex items-center justify-center text-muted-foreground hover:text-primary transition-colors">
               <Icon name="Bell" size={18} />
-              <span className="absolute top-0 right-0 w-4 h-4 bg-primary text-background text-[9px] font-bold rounded-full flex items-center justify-center font-mono">
-                {MOCK_NOTIFS.length}
-              </span>
+              {toasts.length > 0 && (
+                <span className="absolute top-0 right-0 w-4 h-4 bg-primary text-background text-[9px] font-bold rounded-full flex items-center justify-center font-mono">
+                  {toasts.length}
+                </span>
+              )}
             </button>
-            <button className="btn-steam text-xs px-3 py-1.5 hidden md:flex items-center gap-1.5">
-              <Icon name="LogIn" size={14} /> Steam
-            </button>
+            {user ? (
+              <button onClick={() => setPage("profile")} className="hidden md:flex items-center gap-2 border border-border/50 rounded px-2 py-1 hover:border-primary/40 transition-colors">
+                {user.avatar
+                  ? <img src={user.avatar} className="w-6 h-6 rounded-full" alt="" />
+                  : <Icon name="User" size={16} className="text-primary" />}
+                <span className="font-oswald text-white text-xs tracking-wider max-w-[100px] truncate">{user.username}</span>
+              </button>
+            ) : (
+              <button onClick={login} className="btn-steam text-xs px-3 py-1.5 hidden md:flex items-center gap-1.5">
+                <Icon name="LogIn" size={14} /> Войти через Steam
+              </button>
+            )}
             <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="md:hidden text-muted-foreground hover:text-white">
               <Icon name={mobileMenuOpen ? "X" : "Menu"} size={22} />
             </button>
@@ -799,15 +1056,17 @@ export default function App() {
               <span className="font-oswald text-white text-sm uppercase tracking-wider">Уведомления</span>
               <button onClick={() => setNotifOpen(false)}><Icon name="X" size={14} className="text-muted-foreground" /></button>
             </div>
-            {MOCK_NOTIFS.map((n) => (
+            {toasts.length === 0 ? (
+              <div className="px-4 py-6 text-center text-muted-foreground text-sm font-rajdhani">Нет уведомлений</div>
+            ) : toasts.map((n) => (
               <div key={n.id} className="px-4 py-3 border-b border-border/30 last:border-0 hover:bg-secondary/20 transition-colors">
                 <div className="flex items-start gap-2">
-                  <Icon name={n.type === "upgrade" ? "Zap" : "Tag"} size={14} className={`mt-0.5 ${n.type === "upgrade" ? "text-primary" : "text-yellow-400"}`} />
-                  <div>
+                  <Icon name={n.type === "upgrade" ? "Zap" : n.type === "success" ? "CheckCircle" : "Tag"} size={14} className={`mt-0.5 ${n.type === "upgrade" ? "text-primary" : n.type === "success" ? "text-green-400" : "text-yellow-400"}`} />
+                  <div className="flex-1">
                     <div className="text-white text-xs font-rajdhani font-semibold">{n.title}</div>
                     <div className="text-muted-foreground text-xs font-rajdhani">{n.message}</div>
-                    <div className="text-muted-foreground text-[10px] font-mono mt-0.5">{n.time} назад</div>
                   </div>
+                  <button onClick={() => removeToast(n.id)} className="text-muted-foreground hover:text-white"><Icon name="X" size={10} /></button>
                 </div>
               </div>
             ))}
@@ -823,17 +1082,23 @@ export default function App() {
                 <span className="font-oswald text-sm uppercase tracking-wider">{n.label}</span>
               </button>
             ))}
+            {!user && (
+              <button onClick={login} className="w-full flex items-center gap-3 px-6 py-3 text-left text-primary border-t border-border">
+                <Icon name="LogIn" size={16} />
+                <span className="font-oswald text-sm uppercase tracking-wider">Войти через Steam</span>
+              </button>
+            )}
           </div>
         )}
       </header>
 
       <main className="pt-14">
-        {page === "home" && <HomePage setPage={setPage} />}
-        {page === "inventory" && <InventoryPage />}
+        {page === "home" && <HomePage setPage={setPage} user={user} onLogin={login} />}
+        {page === "inventory" && <InventoryPage user={user} token={token} onLogin={login} />}
         {page === "upgrade" && <UpgradePage />}
         {page === "catalog" && <CatalogPage />}
         {page === "history" && <HistoryPage />}
-        {page === "profile" && <ProfilePage />}
+        {page === "profile" && <ProfilePage user={user} onLogin={login} onLogout={logout} />}
         {page === "support" && <SupportPage />}
       </main>
 

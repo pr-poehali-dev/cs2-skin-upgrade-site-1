@@ -1,0 +1,29 @@
+{
+  "tests": [
+    {
+      "name": "Prices missing name",
+      "method": "GET",
+      "path": "/?action=prices",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "name required"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Sell missing params",
+      "method": "POST",
+      "path": "/?action=sell",
+      "body": {},
+      "expectedStatus": 400,
+      "expectedBody": {"error": "assetid and price required"},
+      "bodyMatcher": "partial"
+    },
+    {
+      "name": "Unknown action",
+      "method": "GET",
+      "path": "/?action=unknown",
+      "expectedStatus": 400,
+      "expectedBody": {"error": "unknown action"},
+      "bodyMatcher": "partial"
+    }
+  ]
+}
