@@ -253,6 +253,130 @@ function InventoryPage() {
   );
 }
 
+// ─── Upgrade Wheel ────────────────────────────────────────────────────────────
+function UpgradeWheel({ chance, spinning, result }: { chance: number; spinning: boolean; result: "win" | "lose" | null }) {
+  const arrowRef = useRef<HTMLDivElement>(null);
+  const SIZE = 260;
+  const R = SIZE / 2;
+  const strokeW = 28;
+  const r = R - strokeW / 2;
+  const circ = 2 * Math.PI * r;
+
+  // WIN arc = chance%, LOSE arc = rest. Arrow points UP (top = 0°).
+  // WIN zone: 0° → chance*3.6°, centered so top = middle of WIN zone
+  const winAngle = (chance / 100) * 360;
+  const loseAngle = 360 - winAngle;
+
+  // Arrow final angle:
+  // win  → land in center of WIN zone  (= winAngle/2 from top going CW)
+  // lose → land in center of LOSE zone (= winAngle + loseAngle/2)
+  const baseSpins = 1800; // 5 full spins
+  const winTarget = baseSpins + winAngle / 2;
+  const loseTarget = baseSpins + winAngle + loseAngle / 2;
+
+  useEffect(() => {
+    if (!arrowRef.current) return;
+    if (spinning) {
+      // reset to 0 instantly, then animate to ~halfway through spin
+      arrowRef.current.style.transition = "none";
+      arrowRef.current.style.transform = "rotate(0deg)";
+      void arrowRef.current.offsetHeight; // reflow
+      arrowRef.current.style.transition = "transform 3s cubic-bezier(0.17, 0.67, 0.12, 1.0)";
+      arrowRef.current.style.transform = `rotate(${baseSpins + Math.random() * 180}deg)`;
+    } else if (result) {
+      const target = result === "win" ? winTarget : loseTarget;
+      arrowRef.current.style.transition = "none";
+      arrowRef.current.style.transform = "rotate(0deg)";
+      void arrowRef.current.offsetHeight;
+      arrowRef.current.style.transition = "transform 3s cubic-bezier(0.17, 0.67, 0.12, 1.0)";
+      arrowRef.current.style.transform = `rotate(${target}deg)`;
+    } else {
+      arrowRef.current.style.transition = "none";
+      arrowRef.current.style.transform = "rotate(0deg)";
+    }
+  }, [spinning, result, winTarget, loseTarget]);
+
+  // SVG arcs — WIN (green/primary) starts at top, LOSE (red) follows
+  // SVG 0° = 3 o'clock, so we offset by -90
+  const winDash = (winAngle / 360) * circ;
+  const loseDash = (loseAngle / 360) * circ;
+
+  return (
+    <div className="relative flex items-center justify-center" style={{ width: SIZE, height: SIZE }}>
+      {/* Glow ring */}
+      <div className="absolute inset-0 rounded-full" style={{ boxShadow: "0 0 40px hsl(160 100% 50% / 0.15)" }} />
+
+      <svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`} className="absolute inset-0">
+        {/* BG track */}
+        <circle cx={R} cy={R} r={r} fill="none" stroke="hsl(220 15% 13%)" strokeWidth={strokeW} />
+
+        {/* LOSE arc (red) — full circle baseline */}
+        <circle
+          cx={R} cy={R} r={r} fill="none"
+          stroke="hsl(0 80% 45%)"
+          strokeWidth={strokeW}
+          strokeDasharray={`${circ} 0`}
+          strokeDashoffset={0}
+          transform={`rotate(-90 ${R} ${R})`}
+          style={{ filter: "drop-shadow(0 0 4px hsl(0 80% 45% / 0.5))" }}
+        />
+
+        {/* WIN arc (green) on top */}
+        <circle
+          cx={R} cy={R} r={r} fill="none"
+          stroke="hsl(160 100% 50%)"
+          strokeWidth={strokeW}
+          strokeDasharray={`${winDash} ${circ - winDash}`}
+          strokeDashoffset={0}
+          transform={`rotate(-90 ${R} ${R})`}
+          style={{ filter: "drop-shadow(0 0 6px hsl(160 100% 50% / 0.7))" }}
+        />
+
+        {/* Tick marks */}
+        {[0, 90, 180, 270].map((deg) => {
+          const rad = (deg - 90) * (Math.PI / 180);
+          const x1 = R + (r - strokeW / 2 - 2) * Math.cos(rad);
+          const y1 = R + (r - strokeW / 2 - 2) * Math.sin(rad);
+          const x2 = R + (r + strokeW / 2 + 2) * Math.cos(rad);
+          const y2 = R + (r + strokeW / 2 + 2) * Math.sin(rad);
+          return <line key={deg} x1={x1} y1={y1} x2={x2} y2={y2} stroke="hsl(220 15% 8%)" strokeWidth="2" />;
+        })}
+
+        {/* Center circle */}
+        <circle cx={R} cy={R} r={22} fill="hsl(220 15% 7%)" stroke="hsl(220 15% 18%)" strokeWidth="2" />
+      </svg>
+
+      {/* Center text */}
+      <div className="relative z-10 text-center">
+        <div className="font-oswald font-bold text-2xl text-white leading-none">{chance}%</div>
+        <div className="font-mono text-[9px] text-muted-foreground mt-0.5 uppercase tracking-wider">шанс</div>
+      </div>
+
+      {/* Arrow — fixed pointer at top, wheel "spins" via arrow rotation illusion */}
+      <div
+        ref={arrowRef}
+        className="absolute inset-0 flex items-start justify-center"
+        style={{ transformOrigin: "center center", pointerEvents: "none" }}
+      >
+        {/* Arrow head pointing DOWN toward ring, centered top */}
+        <div style={{ marginTop: R - r - strokeW / 2 - 10 }}>
+          <svg width="18" height="24" viewBox="0 0 18 24">
+            <polygon points="9,22 0,2 18,2" fill="white" style={{ filter: "drop-shadow(0 0 6px white)" }} />
+          </svg>
+        </div>
+      </div>
+
+      {/* Outer labels */}
+      <div className="absolute text-[10px] font-oswald font-bold tracking-wider" style={{ top: 6, left: "50%", transform: "translateX(-50%)", color: "hsl(160 100% 50%)" }}>
+        WIN
+      </div>
+      <div className="absolute text-[10px] font-oswald font-bold tracking-wider" style={{ bottom: 6, left: "50%", transform: "translateX(-50%)", color: "hsl(0 70% 60%)" }}>
+        LOSE
+      </div>
+    </div>
+  );
+}
+
 function UpgradePage() {
   const [fromSkin] = useState<Skin>(MOCK_SKINS[1]);
   const [toSkin] = useState<Skin>(MOCK_SKINS[0]);
@@ -263,27 +387,28 @@ function UpgradePage() {
 
   const doUpgrade = () => {
     if (spinning) return;
-    setSpinning(true);
     setResult(null);
+    setSpinning(true);
+    const outcome = Math.random() < chance / 100 ? "win" : "lose";
     setTimeout(() => {
-      setResult(Math.random() < chance / 100 ? "win" : "lose");
       setSpinning(false);
-    }, 2500);
+      setResult(outcome);
+    }, 3200);
   };
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8 animate-fade-in">
+    <div className="max-w-5xl mx-auto px-6 py-8 animate-fade-in">
       <h2 className="font-oswald text-4xl text-white tracking-wider mb-2">АПГРЕЙД</h2>
       <p className="text-muted-foreground text-sm font-mono mb-8">Обменяй скин на более редкий с шансом победы</p>
 
-      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-6 items-center">
+      <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-8 items-center">
         {/* From */}
         <div>
           <div className="font-oswald text-muted-foreground text-xs uppercase tracking-wider mb-3 flex items-center gap-2">
             <Icon name="Package" size={14} /> Ваш скин
           </div>
           <div className="skin-card rounded-lg overflow-hidden">
-            <img src={fromSkin.image} alt={fromSkin.name} className="w-full h-48 object-cover" />
+            <img src={fromSkin.image} alt={fromSkin.name} className="w-full h-44 object-cover" />
             <div className="p-4">
               <div className={`text-[10px] font-mono rarity-${fromSkin.rarity} mb-1`}>{RARITY_LABELS[fromSkin.rarity]}</div>
               <div className="text-white font-rajdhani font-semibold">{fromSkin.weapon} | {fromSkin.name}</div>
@@ -292,21 +417,30 @@ function UpgradePage() {
           </div>
         </div>
 
-        {/* Chance circle */}
-        <div className="flex flex-col items-center gap-4">
-          <div className="relative w-20 h-20 flex items-center justify-center">
-            <svg className="absolute inset-0 w-20 h-20 -rotate-90" viewBox="0 0 80 80">
-              <circle cx="40" cy="40" r="34" fill="none" stroke="hsl(var(--border))" strokeWidth="2" />
-              <circle cx="40" cy="40" r="34" fill="none" stroke="hsl(160 100% 50%)" strokeWidth="2"
-                strokeDasharray={`${2 * Math.PI * 34 * chance / 100} ${2 * Math.PI * 34}`}
-                style={{ filter: "drop-shadow(0 0 6px hsl(160 100% 50%))" }} />
-            </svg>
-            <span className="font-oswald font-bold text-xl text-white">{chance}%</span>
+        {/* Wheel */}
+        <div className="flex flex-col items-center gap-5">
+          <UpgradeWheel chance={chance} spinning={spinning} result={result} />
+
+          <button
+            onClick={doUpgrade}
+            disabled={spinning}
+            className="btn-neon px-10 py-3 text-base disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {spinning ? (
+              <span className="flex items-center gap-2">
+                <Icon name="Loader2" size={18} className="animate-spin" />
+                Крутим...
+              </span>
+            ) : (
+              <span className="flex items-center gap-2">
+                <Icon name="Zap" size={18} />
+                {result ? "Ещё раз" : "Начать апгрейд"}
+              </span>
+            )}
+          </button>
+          <div className="text-muted-foreground font-mono text-[10px] text-center">
+            Комиссия: 3% · Provably Fair
           </div>
-          <div className="upgrade-arrow">
-            <Icon name="ArrowRight" size={28} className="text-primary" />
-          </div>
-          <span className="font-mono text-xs text-muted-foreground">шанс победы</span>
         </div>
 
         {/* To */}
@@ -315,7 +449,7 @@ function UpgradePage() {
             <Icon name="Trophy" size={14} /> Цель апгрейда
           </div>
           <div className="skin-card rounded-lg overflow-hidden">
-            <img src={toSkin.image} alt={toSkin.name} className="w-full h-48 object-cover" />
+            <img src={toSkin.image} alt={toSkin.name} className="w-full h-44 object-cover" />
             <div className="p-4">
               <div className={`text-[10px] font-mono rarity-${toSkin.rarity} mb-1`}>{RARITY_LABELS[toSkin.rarity]}</div>
               <div className="text-white font-rajdhani font-semibold">{toSkin.weapon} | {toSkin.name}</div>
@@ -326,32 +460,17 @@ function UpgradePage() {
       </div>
 
       {/* Result */}
-      {result && (
-        <div className={`mt-6 rounded-lg p-6 text-center animate-scale-in border ${result === "win" ? "border-green-500/40 bg-green-500/5" : "border-red-500/40 bg-red-500/5"}`}>
+      {result && !spinning && (
+        <div className={`mt-8 rounded-lg p-6 text-center animate-scale-in border ${result === "win" ? "border-green-500/40 bg-green-500/5" : "border-red-500/40 bg-red-500/5"}`}>
           <Icon name={result === "win" ? "Trophy" : "X"} size={48} className={`mx-auto mb-2 ${result === "win" ? "text-yellow-400" : "text-red-400"}`} />
           <div className="font-oswald text-3xl font-bold text-white mb-1">{result === "win" ? "ПОБЕДА!" : "ПРОИГРЫШ"}</div>
           <div className="text-muted-foreground font-rajdhani">
-            {result === "win" ? `${toSkin.weapon} | ${toSkin.name} добавлен в инвентарь` : `${fromSkin.weapon} | ${fromSkin.name} утерян`}
+            {result === "win"
+              ? `${toSkin.weapon} | ${toSkin.name} добавлен в инвентарь`
+              : `${fromSkin.weapon} | ${fromSkin.name} утерян`}
           </div>
         </div>
       )}
-
-      <div className="mt-6 text-center">
-        <button onClick={doUpgrade} disabled={spinning} className="btn-neon px-12 py-4 text-lg disabled:opacity-50 disabled:cursor-not-allowed">
-          {spinning ? (
-            <span className="flex items-center gap-2">
-              <Icon name="Loader2" size={20} className="animate-spin" />
-              Апгрейд идёт...
-            </span>
-          ) : (
-            <span className="flex items-center gap-2">
-              <Icon name="Zap" size={20} />
-              Начать апгрейд
-            </span>
-          )}
-        </button>
-        <div className="text-muted-foreground font-mono text-xs mt-3">Комиссия: 3% · Честный алгоритм · Provably Fair</div>
-      </div>
     </div>
   );
 }
